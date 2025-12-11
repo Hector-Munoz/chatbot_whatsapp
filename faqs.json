@@ -1,0 +1,38 @@
+{
+  "CCUSAFE": {
+    "1": {
+      "pregunta": "No me llega el SMS con el código",
+      "respuesta": "📱 Si el SMS demora, ingresa manualmente el código de respaldo: *123456*."
+    },
+    "2": {
+      "pregunta": "Me sale 'RUT no encontrado'",
+      "respuesta": "⚠️ Debes informar a tu jefatura para que habiliten tu usuario en el sistema. El registro no es automático."
+    },
+    "3": {
+      "pregunta": "No puedo alertar llegada / GPS falla",
+      "respuesta": "📍 Verifica: 1. GPS activado en 'Permitir siempre'. 2. Tener la última versión de la App. 3. Ir a Ajustes > Aplicaciones > CCUSafe > Permisos."
+    },
+    "4": {
+      "pregunta": "No me aparece el viaje asignado",
+      "respuesta": "🚛 Contacta a tu coordinador de transporte. Sin viaje asignado en la App, no podrás ingresar al centro de Origen o Destino."
+    }
+  },
+  "SAFECARD": {
+    "1": {
+      "pregunta": "El Tótem no lee mi QR / No tengo internet",
+      "respuesta": "📶 Conéctate al Wi-Fi de emergencia en portería:\nRed: *Safecard Access Wifi Local*\nClave: *safecard*\n(Sube el brillo de tu pantalla al máximo)."
+    },
+    "2": {
+      "pregunta": "No veo mi código QR en la App",
+      "respuesta": "📲 Ve a la sección 'Accesos' (abajo). Si no aparece, contacta a tu empleador para verificar que tu teléfono coincida con el registrado."
+    },
+    "3": {
+      "pregunta": "¿Cómo crear una invitación?",
+      "respuesta": "📨 Ve a 'Invitar' > Selecciona contacto > Define Motivo, Recinto y Fecha > Presiona 'Invitar'. Puedes compartir el link por WhatsApp."
+    },
+    "4": {
+      "pregunta": "Soy invitado y no tengo la App",
+      "respuesta": "🔗 Abre el link que te enviaron (SMS/WhatsApp), ingresa tu número y presiona 'VER INVITACIÓN CON CÓDIGO QR'."
+    }
+  }
+}
