@@ -1,4 +1,9 @@
+# --- SECRETOS (SE QUEDAN EN TU PC, NO SUBEN) ---
 .env
-venv
-__pycache__
+google_credentials.json
+twilio_2FA_recovery_code.txt
+
+# --- BASURA DE PYTHON ---
+__pycache__/
 *.pyc
+venv/
