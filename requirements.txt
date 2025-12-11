@@ -1,0 +1,7 @@
+flask
+twilio
+google-genai
+pypdf
+python-docx
+python-dotenv
+gunicorn
