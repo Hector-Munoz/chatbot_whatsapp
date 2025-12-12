@@ -1,196 +1,196 @@
 import os
 import json
+import base64
 import datetime
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 from google import genai
 import pypdf
 import docx
-from dotenv import load_dotenv 
+from dotenv import load_dotenv
 
-# LIBRERÍAS DE GOOGLE SHEETS
+# Librerías de Google Sheets
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-load_dotenv() 
+# --- CONFIGURACIÓN INICIAL ---
+load_dotenv()
 app = Flask(__name__)
-API_KEY = os.getenv("GEMINI_API_KEY") 
+API_KEY = os.getenv("GEMINI_API_KEY")
 
-user_sessions = {} 
+# --- CONFIGURACIÓN DE TU EXCEL ---
+NOMBRE_HOJA_CALCULO = "Historial_CcuBot" # Nombre del archivo general
+NOMBRE_PESTANA = "log_chat_wsp"             # <--- ¡NUEVO! Nombre exacto de la pestaña/hoja inferior
 
-# --- CONFIGURACIÓN GOOGLE SHEETS ---
-NOMBRE_HOJA_CALCULO = "Historial_CcuBot" # <--- ¡ASEGÚRATE QUE TU HOJA SE LLAME ASÍ!
+# Memoria temporal de usuarios
+user_sessions = {}
 
+# --- 1. CONEXIÓN A GOOGLE SHEETS (ESPECÍFICA) ---
 def guardar_log_sheets(telefono, mensaje_usuario, respuesta_bot, empresa):
-    """Función para guardar la conversación en la nube"""
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        
-        # Busca el archivo de credenciales en la misma carpeta
-        ruta_creds = os.path.join(os.path.dirname(__file__), 'google_credentials.json')
-        
-        if os.path.exists(ruta_creds):
-            creds = ServiceAccountCredentials.from_json_keyfile_name(ruta_creds, scope)
+        b64_creds = os.getenv("CREDENTIALS_B64") # Leemos del .env
+
+        if b64_creds:
+            # Decodificamos la clave en memoria
+            creds_json = base64.b64decode(b64_creds).decode("utf-8")
+            creds_dict = json.loads(creds_json)
+            
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
             client = gspread.authorize(creds)
             
-            # Abre la hoja y selecciona la primera pestaña
-            sheet = client.open(NOMBRE_HOJA_CALCULO).sheet1
+            # Abrimos el archivo
+            archivo = client.open(NOMBRE_HOJA_CALCULO)
             
-            # Datos a guardar
+            # --- CAMBIO AQUÍ: Seleccionamos la pestaña por nombre ---
+            try:
+                sheet = archivo.worksheet(NOMBRE_PESTANA)
+            except gspread.exceptions.WorksheetNotFound:
+                # Si no encuentra la pestaña, avisa y usa la primera por defecto para no perder el dato
+                print(f"⚠️ NO ENCONTRÉ LA PESTAÑA '{NOMBRE_PESTANA}'. Usando la primera hoja.")
+                sheet = archivo.sheet1
+            
             fecha = datetime.datetime.now().strftime("%Y-%m-%d")
             hora = datetime.datetime.now().strftime("%H:%M:%S")
             
-            # Agrega la fila
             sheet.append_row([fecha, hora, telefono, empresa, mensaje_usuario, respuesta_bot])
-            print(f"✅ Log guardado en Sheets para {telefono}")
+            print(f"✅ Log guardado en pestaña '{sheet.title}' para {telefono}")
         else:
-            print("⚠️ No se encontró google_credentials.json - No se pudo guardar log.")
-            
+            print("⚠️ Error: No se encontró CREDENTIALS_B64 en .env")
     except Exception as e:
-        print(f"❌ Error guardando en Sheets: {e}")
+        print(f"❌ Error Sheets: {e}")
 
-# --- CARGA DE FAQS ---
+# --- 2. CARGA DE MANUALES Y FAQS ---
 def cargar_faqs():
-    ruta_base = os.path.dirname(os.path.abspath(__file__))
-    ruta_json = os.path.join(ruta_base, "faqs.json")
-    if os.path.exists(ruta_json):
-        with open(ruta_json, 'r', encoding='utf-8') as f:
+    if os.path.exists("faqs.json"):
+        with open("faqs.json", 'r', encoding='utf-8') as f:
             return json.load(f)
     return {}
 
 BASE_DE_FAQS = cargar_faqs()
 
-# --- LECTURA DE MANUALES ---
-def extraer_texto_pdf(ruta):
-    texto = ""
-    try:
-        with open(ruta, 'rb') as f:
-            reader = pypdf.PdfReader(f)
-            for page in reader.pages:
-                t = page.extract_text()
-                if t: texto += t.replace("\x00", "").replace("\x0c", "") + "\n"
-    except Exception: pass
-    return texto
-
-def extraer_texto_docx(ruta):
-    texto = ""
-    try:
-        doc = docx.Document(ruta)
-        for para in doc.paragraphs: texto += para.text + "\n"
-    except Exception: pass
-    return texto
-
 def cargar_conocimiento():
     print("--- CARGANDO MANUALES ---")
-    ruta_base = os.path.dirname(os.path.abspath(__file__))
-    directorio = os.path.join(ruta_base, "conocimiento_ccusafe")
     texto_full = ""
-    if not os.path.exists(directorio): return ""
+    directorio = os.path.join(os.path.dirname(__file__), "conocimiento_ccusafe")
+    
+    if not os.path.exists(directorio):
+        print("⚠️ Carpeta 'conocimiento_ccusafe' no encontrada.")
+        return ""
 
     for f in os.listdir(directorio):
         ruta = os.path.join(directorio, f)
-        if f.lower().endswith('.pdf'):
-            texto_full += f"\n--- DOC: {f} ---\n{extraer_texto_pdf(ruta)}"
-        elif f.lower().endswith('.docx'):
-            texto_full += f"\n--- DOC: {f} ---\n{extraer_texto_docx(ruta)}"
+        contenido = ""
+        try:
+            if f.endswith('.pdf'):
+                reader = pypdf.PdfReader(ruta)
+                for page in reader.pages:
+                    contenido += page.extract_text() or ""
+            elif f.endswith('.docx'):
+                doc = docx.Document(ruta)
+                for para in doc.paragraphs:
+                    contenido += para.text + "\n"
+            
+            if contenido:
+                texto_full += f"\n--- DOC: {f} ---\n{contenido}"
+                print(f"   📄 Leído: {f}")
+        except Exception as e:
+            print(f"   ❌ Error leyendo {f}: {e}")
+            
     return texto_full
 
 TEXTO_CONOCIMIENTO = cargar_conocimiento()
 
-# --- CONSULTA A GEMINI ---
+# --- 3. CEREBRO IA (GEMINI) ---
 def consultar_gemini(pregunta, empresa_elegida):
     try:
         client = genai.Client(api_key=API_KEY)
         prompt = f"""
-        ACTÚA COMO: Asistente experto en la aplicación móvil: {empresa_elegida}.
+        ACTÚA COMO: Asistente experto en la app: {empresa_elegida}.
         
-        CONTEXTO CLAVE:
-        SI ES "CCUSAFE": Clave SMS "123456". GPS "Siempre". Estado "Despachado"=Listo.
-        SI ES "SAFECARD": Wi-Fi "Safecard Access Wifi Local" (clave safecard). QR cambia cada 5s.
+        DATOS CLAVE MANUALES:
+        - CCUSAFE: Clave SMS "123456". GPS "Siempre". Estados: Despachado/Recepcionado.
+        - SAFECARD: Wi-Fi "Safecard Access Wifi Local" (clave: safecard). QR cambia cada 5s.
         
-        MANUALES:
+        CONTEXTO:
         {TEXTO_CONOCIMIENTO}
         
-        USUARIO: "{pregunta}"
+        CONSULTA: "{pregunta}"
         
         REGLAS:
         1. Responde SOLO sobre {empresa_elegida}.
-        2. Sé breve, usa Negritas y Listas.
-        3. Si no sabes, deriva a supervisor.
+        2. Sé breve, usa emojis y negritas.
         """
         response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text
     except Exception as e:
-        return "⚠️ Error técnico momentáneo."
+        return "⚠️ Error técnico en IA."
 
-# --- RUTAS FLASK ---
+# --- 4. RUTAS DEL BOT (FLASK) ---
 @app.route('/bot', methods=['POST'])
 def bot():
     incoming_msg = request.values.get('Body', '').strip()
-    sender_id = request.values.get('From') 
+    sender_id = request.values.get('From')
     
     resp = MessagingResponse()
     msg = resp.message()
-    respuesta_final = "" # Variable para guardar lo que enviaremos (para el log)
+    respuesta_final = ""
 
-    if incoming_msg.lower() in ['salir', 'menu', 'inicio', 'hola', 'buenas']:
+    # Comando de reinicio
+    if incoming_msg.lower() in ['salir', 'menu', 'inicio', 'hola']:
         if sender_id in user_sessions: del user_sessions[sender_id]
-    
+
     # ETAPA 1: BIENVENIDA
     if sender_id not in user_sessions:
         respuesta_final = (
-            "👋 *Soporte Apps CCU*\nSelecciona tu aplicación:\n\n"
+            "👋 *Soporte CCU*\nElige tu App:\n\n"
             "1️⃣ *CCU SAFE* (Camiones)\n"
-            "2️⃣ *SAFECARD* (Accesos)\n"
+            "2️⃣ *SAFECARD* (Accesos)"
         )
         msg.body(respuesta_final)
         user_sessions[sender_id] = {"estado": "ELIGIENDO", "empresa": "PENDIENTE"}
         return str(resp)
 
-    estado_actual = user_sessions[sender_id]["estado"]
+    estado = user_sessions[sender_id]["estado"]
 
-    # ETAPA 2: MOSTRAR FAQ
-    if estado_actual == "ELIGIENDO":
-        empresa = ""
+    # ETAPA 2: SELECCIÓN Y MENÚ DE FALLAS
+    if estado == "ELIGIENDO":
         if incoming_msg == "1": empresa = "CCUSAFE"
         elif incoming_msg == "2": empresa = "SAFECARD"
         else:
-            msg.body("⚠️ Escribe *1* o *2*.")
+            msg.body("⚠️ Por favor escribe *1* o *2*.")
             return str(resp)
         
         user_sessions[sender_id]["empresa"] = empresa
         user_sessions[sender_id]["estado"] = "CONVERSANDO"
         
-        faqs_empresa = BASE_DE_FAQS.get(empresa, {})
-        respuesta_final = f"🔧 *Soporte {empresa}*\n\nEscribe el número de tu problema:\n\n"
-        for key, info in faqs_empresa.items():
-            respuesta_final += f"*{key}*. {info['pregunta']}\n"
-        respuesta_final += "\nO escribe tu duda detallada 👇"
+        # Mostrar menú desde JSON
+        faqs = BASE_DE_FAQS.get(empresa, {})
+        respuesta_final = f"🔧 *Menú {empresa}*\n\n"
+        for k, v in faqs.items():
+            respuesta_final += f"*{k}*. {v['pregunta']}\n"
+        respuesta_final += "\nO escribe tu duda 👇"
         
         msg.body(respuesta_final)
-        
-        # Guardamos log de selección de menú
-        guardar_log_sheets(sender_id, incoming_msg, "Menú desplegado", empresa)
+        guardar_log_sheets(sender_id, incoming_msg, "Menú mostrado", empresa)
         return str(resp)
 
-    # ETAPA 3: RESPONDER
-    elif estado_actual == "CONVERSANDO":
-        empresa_actual = user_sessions[sender_id]["empresa"]
-        faqs_empresa = BASE_DE_FAQS.get(empresa_actual, {})
+    # ETAPA 3: RESPUESTA (FAQ O IA)
+    elif estado == "CONVERSANDO":
+        empresa = user_sessions[sender_id]["empresa"]
+        faqs = BASE_DE_FAQS.get(empresa, {})
         
-        if incoming_msg in faqs_empresa:
-            # Respuesta rápida (FAQ)
-            texto_faq = faqs_empresa[incoming_msg]["respuesta"]
-            respuesta_final = f"💡 *Solución:*\n\n{texto_faq}\n\n_Escribe otra consulta o 'menu'._"
+        # Opción A: Es número del menú
+        if incoming_msg in faqs:
+            texto = faqs[incoming_msg]["respuesta"]
+            respuesta_final = f"💡 *Solución:*\n{texto}\n\n_Escribe otra duda o 'menu'._"
+        # Opción B: Pregunta a Gemini
         else:
-            # Respuesta Inteligente (Gemini)
-            respuesta_final = consultar_gemini(incoming_msg, empresa_actual)
+            respuesta_final = consultar_gemini(incoming_msg, empresa)
             
         msg.body(respuesta_final)
-        
-        # --- AQUÍ GUARDAMOS EN SHEETS ---
-        guardar_log_sheets(sender_id, incoming_msg, respuesta_final, empresa_actual)
-            
+        guardar_log_sheets(sender_id, incoming_msg, respuesta_final, empresa)
+
     return str(resp)
 
 if __name__ == '__main__':
